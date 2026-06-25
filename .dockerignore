@@ -1,0 +1,12 @@
+.git
+.gitignore
+.husky
+node_modules
+packages/widget/node_modules
+packages/widget/dist
+.next
+.contentlayer
+.env
+.env.*
+!.env.example
+*.md

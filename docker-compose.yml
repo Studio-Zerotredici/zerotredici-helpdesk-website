@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      AUTH_TRUST_HOST: "true"
+    networks:
+      - gateway
+      - postgres-16
+
+networks:
+  gateway:
+    external: true
+  postgres-16:
+    external: true
+
