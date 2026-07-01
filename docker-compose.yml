@@ -34,6 +34,7 @@ services:
       ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: "${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:-}"
     networks:
       - chatwoot-backend
+      - dokploy-network
     security_opt:
       - no-new-privileges:true
 
@@ -73,6 +74,7 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Dokploy Environment}"
     networks:
       - chatwoot-backend
+      - dokploy-network
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -93,6 +95,7 @@ services:
       REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in Dokploy Environment}"
     networks:
       - chatwoot-backend
+      - dokploy-network
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -104,3 +107,5 @@ services:
 networks:
   chatwoot-backend:
     driver: bridge
+  dokploy-network:
+    external: true

@@ -57,43 +57,46 @@ As with Termix: **Dokploy Environment tab values only reach a container if the c
 
 `rails db:chatwoot_prepare` is baked into the `rails` service's start command (`bundle exec sh -c 'rails db:chatwoot_prepare && rails s ...'`), so migrations run automatically on every deploy — safe and idempotent, and means you don't need a separate manual migration step after each redeploy. `rails` and `sidekiq` both wait on `postgres`/`redis` reaching `service_healthy` (not just `service_started`) before starting, so a slow cold-start Postgres can't cause a migration to run against a not-yet-ready database.
 
-## Networking Model (read before troubleshooting a 404)
+## Networking Model
 
-`docker-compose.yml` deliberately declares **no external network** — only the
-internal `chatwoot-backend` bridge network the four services use to talk to
-each other (e.g. `rails` → `postgres`/`redis`). This is intentional, not an
-oversight:
+`docker-compose.yml` declares two networks per service: the internal
+`chatwoot-backend` bridge (declared by us) **and** `dokploy-network`
+(declared `external: true`, meaning it must already exist on the host —
+Dokploy creates it itself, we never create it).
+
+Why both, on every service (`rails`, `sidekiq`, `postgres`, `redis`), not just
+`rails`:
 
 - When you assign the domain to the `rails` service in Dokploy's Domains UI
-  (deployment step 5 below), **Dokploy automatically injects Traefik routing
-  labels and connects that specific service to its own `dokploy-network`** at
-  deploy time — you can see the final result via Dokploy's "Preview Compose"
-  button before deploying. Don't hand-write Traefik labels or declare an
-  external network yourself for this; Dokploy generates it.
-- `dokploy-network` is Traefik's routing plane only — it has nothing to do
-  with how `rails`/`sidekiq`/`postgres`/`redis` reach each other, which is
-  handled entirely by the internal `chatwoot-backend` network already in the
-  compose file.
-- **Known Dokploy bug** ([Dokploy/dokploy#3435](https://github.com/Dokploy/dokploy/issues/3435)):
-  in some cases, a Compose-deployed service doesn't actually get connected to
-  `dokploy-network` even though the Traefik labels look correct, so the
-  domain 404s. If `https://helpdesk.zerotredici.app` 404s after a deploy with
-  the domain correctly configured, the documented workaround is to add the
-  network explicitly to the `rails` service (exact name matters — it must be
-  `dokploy-network`, not an invented name) and redeploy:
-  ```yaml
-  services:
-    rails:
-      networks:
-        - chatwoot-backend
-        - dokploy-network
-  networks:
-    dokploy-network:
-      external: true
-  ```
-  Only add this if the 404 actually happens — don't pre-emptively declare it,
-  since Dokploy's automatic injection is the documented default behavior and
-  works in the normal case.
+  (deployment step below), Dokploy automatically injects Traefik routing
+  labels and connects `rails` to `dokploy-network` at deploy time — you can
+  see the result via Dokploy's "Preview Compose" button before deploying.
+- **Confirmed in production (2026-07-01), not just theoretical:** when
+  `rails` didn't already declare `chatwoot-backend` + `dokploy-network`
+  explicitly itself, Dokploy's domain-injection ended up leaving `rails`
+  unable to reach `postgres` by hostname at all — Postgres was fully healthy
+  with real persisted data, but `rails`'s own `pg_isready -h postgres` wait
+  loop never got a response. Root cause: Dokploy's injection into the
+  domain-assigned service's `networks:` list doesn't reliably *add* to
+  whatever's already declared for that service — it can end up leaving the
+  service off the plain internal bridge network the other three containers
+  are still on. Since `postgres`/`redis`/`sidekiq` have no domain assigned,
+  Dokploy never touches their `networks:` key, so they stayed correctly on
+  `chatwoot-backend` — only `rails` desynced.
+- **Fix applied:** every service explicitly declares **both**
+  `chatwoot-backend` and `dokploy-network` in `docker-compose.yml` itself, so
+  it doesn't matter how Dokploy's injection behaves on the domain-assigned
+  service — all four containers already share a common network regardless.
+  This matches Dokploy's own documented guidance: "Dokploy will add the
+  `dokploy-network` to the service you selected, however you need to add
+  `dokploy-network` to the *other* services to maintain connectivity."
+- Related but distinct: [Dokploy/dokploy#3435](https://github.com/Dokploy/dokploy/issues/3435)
+  documents the same underlying `dokploy-network`-attachment unreliability
+  causing Traefik 404s specifically (external routing, not internal
+  service-to-service traffic) — same root behavior, different symptom.
+- `dokploy-network` must already exist on the host for `external: true` to
+  resolve — Dokploy creates it itself during its own setup; we never create
+  it ourselves.
 
 ## Host Preparation
 
