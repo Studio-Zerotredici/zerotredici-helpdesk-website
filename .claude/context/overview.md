@@ -92,7 +92,8 @@ Agent reply → sendMessage() action
 NEXT_PUBLIC_APP_URL
 AUTH_SECRET
 AUTH_TRUST_HOST                              # true, dietro reverse proxy
-DATABASE_URL
+POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB   # Postgres bundled in docker-compose.yml (default)
+# oppure DATABASE_URL diretto per un Postgres esterno/managed
 RESEND_API_KEY
 EMAIL_FROM                                    # dominio verificato su Resend
 EMAIL_REPLY_TO_DOMAIN                         # opzionale, reply-by-email
@@ -106,7 +107,8 @@ NEXT_PUBLIC_CLARITY_PROJECT_ID               # opzionale
 ```
 
 Login email+password (Credentials provider) funziona con solo
-`AUTH_SECRET` + `DATABASE_URL` — Resend/Google non sono bloccanti.
+`AUTH_SECRET` + un Postgres raggiungibile (bundled o `DATABASE_URL`
+esterno) — Resend/Google non sono bloccanti.
 
 Dettaglio completo in [deployment.md](./deployment.md) e in
 [`DOKPLOY.md`](../../DOKPLOY.md) (percorso di deploy concreto su Dokploy

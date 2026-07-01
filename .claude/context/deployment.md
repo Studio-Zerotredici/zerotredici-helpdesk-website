@@ -67,7 +67,16 @@ Eseguito su **ogni** avvio del container (`ENTRYPOINT` del Dockerfile).
 eseguite, quindi è sicuro rieseguirlo ad ogni boot. Il primo deploy crea lo
 schema da zero, senza bisogno di un `pnpm prisma db push` manuale.
 
-### docker-compose.yml
+### docker-compose.yml — stack unico (app + Postgres bundled)
+
+`docker-compose.yml` include Postgres come servizio *sibling* nello stesso
+stack (non nello stesso container/Dockerfile dell'app — sarebbe un
+anti-pattern: niente restart/backup/scaling indipendenti del DB). `app`
+aspetta che `postgres` sia `service_healthy` prima di avviarsi
+(`depends_on` + `healthcheck` con `pg_isready`); `DATABASE_URL` viene
+calcolato automaticamente via interpolazione compose da `POSTGRES_USER` /
+`POSTGRES_PASSWORD` / `POSTGRES_DB` — non va impostato a mano in questo
+percorso.
 
 ```yaml
 services:
@@ -75,23 +84,52 @@ services:
     build: .
     ports: ["3000:3000"]
     env_file: .env
-    networks:
-      - gateway
-      - postgres-16
+    environment:
+      AUTH_TRUST_HOST: "true"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-guddesk}:${POSTGRES_PASSWORD:?...}@postgres:5432/${POSTGRES_DB:-guddesk}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [gateway, internal]
+
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    networks: [internal]        # nessun ports: — mai esposto sull'host
+    healthcheck: {test: "pg_isready -U ... -d ...", interval: 5s, retries: 10}
 
 networks:
   gateway:
-    external: true   # rete esterna per reverse proxy
-  postgres-16:
-    external: true   # rete esterna per il database
+    external: true   # rete esterna per reverse proxy (Dokploy/Traefik)
+  internal:           # rete interna dello stack, non esterna
+
+volumes:
+  postgres-data:
 ```
 
 **Nota:** `AUTH_TRUST_HOST=true` è richiesto in produzione quando si usa un reverse proxy (Nginx, Traefik, Caddy).
 
-Su Dokploy si usa il build type **Dockerfile** direttamente (non
-docker-compose per l'app — Postgres e Soketi sono invece risorse/servizi
-Dokploy separati). Vedi [`DOKPLOY.md`](../../DOKPLOY.md) nella root del
-repo per il percorso di deploy completo specifico di Studio Zerotredici.
+Su Dokploy si usa il deploy type **Compose** (non Application/Dockerfile
+diretto) per ottenere questo stack unico — Dokploy builda `app` dal
+`Dockerfile` del repo via `build: .` e avvia `postgres` insieme, sulla rete
+interna, mai esposto su una porta host. Un dominio+TLS va assegnato al
+servizio `app` (porta 3000) dalla UI di Dokploy, stesso pattern usato per
+Soketi. **Nota appresa da un deploy Dokploy Compose precedente (Termix):**
+i valori impostati nel tab Environment di Dokploy raggiungono il container
+solo se il compose file li referenzia esplicitamente nel blocco
+`environment:` (come interpolazione `${VAR}`) — non dare per scontato un
+passthrough implicito.
+
+Se in futuro serve un Postgres esternalizzato (backup/scaling indipendenti
+dall'app, es. Dokploy managed Postgres) si rimuove il servizio `postgres` e
+le `POSTGRES_*` da `docker-compose.yml`, si imposta `DATABASE_URL`
+direttamente, e si può tornare al deploy type Application/Dockerfile puro.
+
+Vedi [`DOKPLOY.md`](../../DOKPLOY.md) nella root del repo per il percorso
+di deploy completo specifico di Studio Zerotredici (in due fasi: quick
+start con Pusher Cloud + stack bundled, poi personalizzazione con Soketi
+self-hosted).
 
 ### Comandi Docker
 
@@ -120,8 +158,14 @@ NEXT_PUBLIC_APP_URL=https://app.guddesk.com
 AUTH_SECRET=<random-32-chars>   # openssl rand -base64 32
 AUTH_TRUST_HOST=true             # obbligatorio con reverse proxy
 
-# Database
-DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
+# Database — default: Postgres bundled in docker-compose.yml (vedi sopra),
+# DATABASE_URL calcolato automaticamente da questi tre:
+POSTGRES_USER=guddesk
+POSTGRES_PASSWORD=<password-reale>
+POSTGRES_DB=guddesk
+# Alternativa: Postgres esterno/managed — DATABASE_URL diretto, rimuovendo
+# il servizio postgres da docker-compose.yml
+# DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
 
 # Email
 RESEND_API_KEY=re_xxxxx

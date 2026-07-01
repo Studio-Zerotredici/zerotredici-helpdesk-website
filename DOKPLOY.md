@@ -9,9 +9,24 @@ the steps below are done.
 
 Scope: this repo is **GudDesk only**. It does not call or depend on GudCal,
 GudForm, or GudAgent anywhere in the codebase — it's a fully standalone
-Next.js + Postgres app. Those three are separate GudLab products/repos; the
-only real integration direction is GudAgent *calling into* GudDesk's REST
-API later, not the reverse. Nothing below requires them.
+Next.js + Postgres app, and its database is not shared with those other
+Gud* products. Those three are separate GudLab products/repos; the only real
+integration direction is GudAgent *calling into* GudDesk's REST API later,
+not the reverse. Nothing below requires them.
+
+## Two-phase plan
+
+**Phase 1 (this section): get it running with default/hosted features.**
+Bundled Postgres (one stack, no extra Dokploy resource), Pusher Cloud for
+real-time (zero extra infra), Resend for email. Goal: a fully working
+GudDesk — login, chat, email — with the least amount of infrastructure to
+stand up first.
+
+**Phase 2 (further down): personalize.** Once phase 1 is confirmed working,
+swap Pusher Cloud for self-hosted Soketi (EU data residency) — a pure env
+var change, no redeploy of code. Optionally externalize Postgres to a
+managed Dokploy resource later if you want independent backup/scaling from
+the app container.
 
 ## Why login/email don't "just work" yet
 
@@ -28,22 +43,137 @@ Two things needed fixing in this fork before go-live, both now done in code
    to your own Resend account email, not real users) or a `guddesk.com`
    domain we don't own. They now read `EMAIL_FROM` / `EMAIL_REPLY_TO_DOMAIN`
    with a dev-only fallback — **these must be set to a domain verified in
-   our Resend account before go-live** (step 4 below).
+   our Resend account before go-live** (step 3 below).
 
 Good news already in the fork: Google OAuth is not the only login method —
 `auth.config.ts` has Credentials (email+password, bcrypt) and Resend magic
 link alongside it, so login isn't blocked on setting up Google OAuth at all.
 
-## Step 1 — Postgres
+---
 
-In Dokploy: create a **Postgres** managed database resource (not the
-`postgres-docker-compose.yml` in this repo — that's for local dev only).
-Set a real password. Note the internal connection string for `DATABASE_URL`
-in step 4. Do not expose port 5432 publicly.
+# Phase 1 — get it running
 
-## Step 2 — Soketi (self-hosted real-time)
+## Step 1 — Deploy as a Dokploy Compose app (bundled Postgres)
 
-We're self-hosting real-time chat instead of using Pusher Cloud, per the
+`docker-compose.yml` bundles Postgres alongside the app as one stack — no
+separate Dokploy-managed Postgres resource needed for this phase:
+
+1. In Dokploy: create a new application pointed at this repo
+   (`Studio-Zerotredici/zerotredici-helpdesk-website`), deploy type
+   **Compose** (not Application/Dockerfile-only, and not Nixpacks — see the
+   013 report for why Dockerfile-based builds: deterministic, pinned builds
+   with the widget/Contentlayer build chain baked into the image).
+2. Dokploy builds the `app` service from the repo's own `Dockerfile` (via
+   `build: .` in `docker-compose.yml`) and starts the bundled `postgres`
+   service alongside it, on an internal network — Postgres is never
+   exposed on a host port.
+3. Assign a domain to the `app` service, port `3000`, enable TLS (same
+   domain-per-service pattern used for Soketi in step 2 of phase 2 below).
+4. **Caveat learned from a prior Dokploy Compose deployment (Termix):**
+   values set in Dokploy's Environment tab only reach the container if the
+   compose file's `environment:` block actually references them (as
+   `${VAR}` interpolation) — a plain `env_file:` pointing at a
+   Dokploy-generated `.env` should work, but if a var isn't showing up
+   inside the container, check it's referenced explicitly rather than
+   assuming implicit passthrough.
+
+## Step 2 — Environment variables (phase 1 minimum)
+
+Copy `.env.example` as your starting point and fill in real values as
+Dokploy **secrets** (not committed anywhere). Minimum for a working
+login+email+chat deploy in this phase:
+
+| Variable | Required for | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | everything | `https://desk.yourdomain.com`, no trailing slash |
+| `AUTH_SECRET` | sessions | `openssl rand -base64 32` — set explicitly, don't autogenerate |
+| `AUTH_TRUST_HOST` | reverse proxy | `true` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | bundled Postgres | `docker-compose.yml` computes `DATABASE_URL` from these — set a real password, never the default |
+| `RESEND_API_KEY` | magic link / reset / invites | from resend.com |
+| `EMAIL_FROM` | magic link / reset / invites | e.g. `GudDesk <support@yourdomain.com>` — domain must be verified in Resend (step 3) |
+| `EMAIL_REPLY_TO_DOMAIN` | reply-by-email | optional, e.g. `mail.yourdomain.com`, needs Resend inbound routing |
+| `PUSHER_APP_ID` / `PUSHER_SECRET` / `NEXT_PUBLIC_PUSHER_KEY` / `NEXT_PUBLIC_PUSHER_CLUSTER` | real-time (Pusher Cloud) | create a free app at pusher.com |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google login | optional, step 5 |
+| `ANTHROPIC_API_KEY` | AI features | optional — leave unset if sending conversation content to a US provider isn't acceptable |
+
+Email+password login (Credentials provider) works with just `AUTH_SECRET`
+and the bundled Postgres — no Resend/Pusher/Google needed for that path
+alone, but Resend is needed for the rest of the golden path (invites,
+password reset).
+
+## Step 3 — Verify the Resend sending domain
+
+1. resend.com → Domains → Add Domain → add the SPF/DKIM/DMARC records it
+   gives you to our DNS (Cloudflare) via the `cloudflare-dns` skill.
+2. Wait for verification (usually minutes, can take longer for DNS
+   propagation).
+3. Use an address on that domain for `EMAIL_FROM`, e.g.
+   `GudDesk <support@yourdomain.com>`.
+4. Reply-by-email (`EMAIL_REPLY_TO_DOMAIN`) is optional — only set it up if
+   we want agents to be able to reply to visitors from their email client;
+   it needs Resend's inbound-email routing pointed at
+   `POST https://desk.yourdomain.com/api/email/inbound`.
+
+## Step 4 — Pusher Cloud (real-time)
+
+1. pusher.com → create a free app (EU cluster region for data residency,
+   e.g. `eu`).
+2. Copy `app_id` / `key` / `secret` / `cluster` into `PUSHER_APP_ID` /
+   `NEXT_PUBLIC_PUSHER_KEY` / `PUSHER_SECRET` / `NEXT_PUBLIC_PUSHER_CLUSTER`.
+3. Leave `PUSHER_HOST` / `NEXT_PUBLIC_PUSHER_HOST` unset — that's what
+   selects Pusher Cloud over self-hosted Soketi (see phase 2).
+
+If skipped entirely, GudDesk still works — the widget/inbox fall back to
+4-second polling instead of real-time.
+
+## Step 5 — Google OAuth (optional)
+
+1. console.cloud.google.com → APIs & Services → Credentials → Create OAuth
+   client ID (Web application).
+2. Authorized redirect URI: `https://desk.yourdomain.com/api/auth/callback/google`.
+3. Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+Skip this entirely if email+password is enough for our agents — nothing
+else depends on it.
+
+## Step 6 — First deploy
+
+Build and deploy the GudDesk stack in Dokploy. On container start,
+`entrypoint.sh` runs `prisma migrate deploy` (applies `prisma/migrations/`)
+before starting the server — first boot creates the schema automatically,
+no manual `pnpm prisma db push` needed. The Prisma CLI used for this is
+installed into an isolated `/opt/prisma-cli` directory in the Dockerfile's
+runner stage (not copied from the builder stage) — pnpm's non-hoisted
+`node_modules` keeps the CLI's own private dependencies
+(`@prisma/engines`, `@prisma/config`, ...) as symlinks into
+`node_modules/.pnpm`, which a plain `COPY` leaves dangling once separated
+from that store; a scoped `pnpm add` in its own directory resolves them
+correctly. Verified end-to-end against a real Postgres container — this
+part of the Dockerfile is no longer a guess.
+
+## Step 7 — Verification checklist
+
+- [ ] `https://desk.yourdomain.com` loads, register/login pages render
+- [ ] Create the first account via email+password (Credentials) — this
+      should work even before Google OAuth is configured
+- [ ] Set up a workspace, get the widget snippet, embed it on a test page
+- [ ] Send a message from the widget, confirm it appears in the inbox
+      (real-time via Pusher Cloud, or within ~4s via polling if skipped)
+- [ ] Trigger "forgot password" — confirm the email arrives (proves
+      `EMAIL_FROM` + Resend domain verification worked)
+- [ ] Invite a teammate to the workspace — confirm the invite email arrives
+- [ ] If Google OAuth configured: log in with Google
+
+Once this checklist passes, phase 1 is done — move to phase 2 whenever
+personalization is worth the extra infra.
+
+---
+
+# Phase 2 — personalize
+
+## Self-hosted Soketi (replace Pusher Cloud)
+
+We can self-host real-time chat instead of using Pusher Cloud, per the
 013 self-hosting review (EU data residency). Dokploy ships Soketi as a
 **built-in template** — use that instead of a hand-rolled compose file:
 
@@ -77,99 +207,25 @@ We're self-hosting real-time chat instead of using Pusher Cloud, per the
    with an `Upgrade` header — Traefik proxies them transparently, no
    special config needed.
 4. Deploy. Confirm `https://ws.yourdomain.com` responds.
+5. Set `PUSHER_HOST` / `NEXT_PUBLIC_PUSHER_HOST` (+ `PUSHER_PORT` /
+   `NEXT_PUBLIC_PUSHER_PORT` / `PUSHER_USE_TLS` /
+   `NEXT_PUBLIC_PUSHER_FORCE_TLS`) to point at Soketi, matching
+   `PUSHER_APP_ID` / `NEXT_PUBLIC_PUSHER_KEY` / `PUSHER_SECRET` to the
+   `SOKETI_DEFAULT_*` values from step 2. This is a pure env var change —
+   restart the app, no rebuild needed. See `.env.example` for the exact
+   variable block.
 
-If you'd rather not run Soketi yet, skip this — GudDesk works fine without
-real-time (falls back to 4-second polling in the widget/inbox). You can add
-it later.
+## Externalizing Postgres (optional)
 
-## Step 3 — GudDesk application
-
-1. In Dokploy, create a new application pointed at this repo
-   (`Studio-Zerotredici/zerotredici-helpdesk-website`), build type
-   **Dockerfile** (the repo's own `Dockerfile`, not Nixpacks — see the 013
-   report for why: deterministic, pinned builds and the widget/Contentlayer
-   build chain baked into the image).
-2. Container port `3000`.
-3. Point a domain at it, e.g. `desk.yourdomain.com`, enable TLS.
-
-## Step 4 — Environment variables
-
-Copy `.env.example` as your starting point and fill in real values as
-Dokploy **secrets** (not committed anywhere). Minimum for a working
-login+email deploy:
-
-| Variable | Required for | Notes |
-|---|---|---|
-| `NEXT_PUBLIC_APP_URL` | everything | `https://desk.yourdomain.com`, no trailing slash |
-| `AUTH_SECRET` | sessions | `openssl rand -base64 32` — set explicitly, don't autogenerate |
-| `AUTH_TRUST_HOST` | reverse proxy | `true` |
-| `DATABASE_URL` | everything | from Step 1, internal Dokploy network address |
-| `RESEND_API_KEY` | magic link / reset / invites | from resend.com |
-| `EMAIL_FROM` | magic link / reset / invites | e.g. `GudDesk <support@yourdomain.com>` — domain must be verified in Resend (step 5) |
-| `EMAIL_REPLY_TO_DOMAIN` | reply-by-email | e.g. `mail.yourdomain.com`, needs Resend inbound routing if you want this feature |
-| `PUSHER_APP_ID` / `PUSHER_SECRET` / `NEXT_PUBLIC_PUSHER_KEY` | real-time | same values as Soketi step 2 |
-| `PUSHER_HOST` / `NEXT_PUBLIC_PUSHER_HOST` | real-time (Soketi) | `ws.yourdomain.com` |
-| `PUSHER_PORT` / `NEXT_PUBLIC_PUSHER_PORT` | real-time (Soketi) | `443` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google login | optional, step 6 |
-| `ANTHROPIC_API_KEY` | AI features | optional — leave unset if sending conversation content to a US provider isn't acceptable |
-
-Email+password login (Credentials provider) works with just `AUTH_SECRET`
-and `DATABASE_URL` — no Resend/Google needed for that path.
-
-## Step 5 — Verify the Resend sending domain
-
-1. resend.com → Domains → Add Domain → add the SPF/DKIM/DMARC records it
-   gives you to our DNS (Cloudflare) via the `cloudflare-dns` skill.
-2. Wait for verification (usually minutes, can take longer for DNS
-   propagation).
-3. Use an address on that domain for `EMAIL_FROM`, e.g.
-   `GudDesk <support@yourdomain.com>`.
-4. Reply-by-email (`EMAIL_REPLY_TO_DOMAIN`) is optional — only set it up if
-   we want agents to be able to reply to visitors from their email client;
-   it needs Resend's inbound-email routing pointed at
-   `POST https://desk.yourdomain.com/api/email/inbound`.
-
-## Step 6 — Google OAuth (optional)
-
-1. console.cloud.google.com → APIs & Services → Credentials → Create OAuth
-   client ID (Web application).
-2. Authorized redirect URI: `https://desk.yourdomain.com/api/auth/callback/google`.
-3. Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
-
-Skip this entirely if email+password is enough for our agents — nothing
-else depends on it.
-
-## Step 7 — First deploy
-
-Build and deploy the GudDesk app in Dokploy. On container start,
-`entrypoint.sh` runs `prisma migrate deploy` (applies `prisma/migrations/`)
-before starting the server — first boot creates the schema automatically,
-no manual `pnpm prisma db push` needed.
-
-**Watch the first deploy's logs** for the migration step — this is the one
-part of the Dockerfile change (copying the `prisma` CLI into the slim
-runner image) that couldn't be verified without an actual `pnpm install` +
-Docker build, which wasn't possible in this review. If
-`node ./node_modules/prisma/build/index.js migrate deploy` errors on first
-boot, the fallback is running it once manually via Dokploy's "Exec into
-container" / `docker exec` and adjusting the CLI invocation path in
-`entrypoint.sh` to match whatever pnpm actually laid out under
-`node_modules/prisma/` — everything else in the image is unaffected.
-
-## Step 8 — Verification checklist
-
-- [ ] `https://desk.yourdomain.com` loads, register/login pages render
-- [ ] Create the first account via email+password (Credentials) — this
-      should work even before Resend/Google are configured
-- [ ] Set up a workspace, get the widget snippet, embed it on a test page
-- [ ] Send a message from the widget, confirm it appears in the inbox
-      (real-time if Soketi is up, otherwise within ~4s via polling)
-- [ ] Trigger "forgot password" — confirm the email arrives (proves
-      `EMAIL_FROM` + Resend domain verification worked)
-- [ ] Invite a teammate to the workspace — confirm the invite email arrives
-- [ ] If Google OAuth configured: log in with Google
-- [ ] If Soketi configured: open browser devtools on the widget page,
-      confirm a `wss://ws.yourdomain.com` connection, not polling
+Phase 1's bundled Postgres is fine indefinitely for a single-app deploy.
+If we later want independent backup/scaling/restart from the app
+container (e.g. multiple apps sharing one DB host, or Dokploy's managed
+Postgres UI for point-in-time restore), move to a separate managed
+Postgres resource instead: create it in Dokploy, set `DATABASE_URL`
+directly in `.env` to its internal connection string, and remove the
+`postgres` service (and the `POSTGRES_*` vars) from `docker-compose.yml` —
+or switch the app back to a plain Dockerfile "Application" deploy type
+instead of Compose.
 
 ## Rollback
 
@@ -185,16 +241,19 @@ automatic.
 See the 013 report ("Self-Hosting del Gud Stack", checklist on page 8) for
 the full list. The ones this bundle doesn't already handle for you:
 
-- Replace the default Postgres password, never expose port 5432
+- Replace the default Postgres password (`POSTGRES_PASSWORD` in `.env`),
+  never expose port 5432 publicly (the bundled `postgres` service already
+  has no `ports:` mapping — don't add one)
 - Store all secrets in Dokploy's secret store, not committed `.env` files
 - Confirm `.env` stays git-ignored in this fork
-- Document data residency (Resend region, Soketi vs Pusher, Anthropic if
-  enabled) for the GDPR Art. 30 register; a self-hosted Soketi resolves the
-  real-time item, EU Resend region resolves email, leaving only the
-  Anthropic AI features (optional, off by default) as a US-provider item
+- Document data residency (Resend region, Pusher Cloud cluster vs Soketi,
+  Anthropic if enabled) for the GDPR Art. 30 register; a self-hosted Soketi
+  resolves the real-time item once phase 2 is done, EU Resend region
+  resolves email, leaving only the Anthropic AI features (optional, off by
+  default) as a US-provider item
 - `/api/widget/*` and `/api/pusher/*` intentionally allow
   `Access-Control-Allow-Origin: *` — this is by design (the widget must be
   embeddable on any customer's website), not an oversight; no action needed
   unless we want to restrict which sites can embed it
-- Set up scheduled `pg_dump` backups of the Postgres volume and test a
-  restore
+- Set up scheduled `pg_dump` backups of the Postgres volume
+  (`postgres-data` in `docker-compose.yml`) and test a restore

@@ -195,9 +195,10 @@ Bot messages appear natively in both the chat widget and the agent inbox. Build 
 
 This fork ships a multi-stage `Dockerfile` (standalone Next.js output, widget
 + Contentlayer build baked in, migrations run automatically on container
-start via `entrypoint.sh`) plus `docker-compose.yml` and
-`soketi-docker-compose.yml` for a self-hosted real-time backend. See
-[`DOKPLOY.md`](./DOKPLOY.md) for the full Studio Zerotredici deployment
+start via `entrypoint.sh`) plus a `docker-compose.yml` that bundles Postgres
+alongside the app as one deployable stack. Real-time can start on Pusher
+Cloud (zero extra infra) and move to a self-hosted Soketi instance later —
+see [`DOKPLOY.md`](./DOKPLOY.md) for the full Studio Zerotredici deployment
 runbook.
 
 ### Manual
