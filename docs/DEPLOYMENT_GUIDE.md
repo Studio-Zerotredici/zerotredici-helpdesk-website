@@ -98,6 +98,61 @@ Why both, on every service (`rails`, `sidekiq`, `postgres`, `redis`), not just
   resolve — Dokploy creates it itself during its own setup; we never create
   it ourselves.
 
+### MTU mismatch on `chatwoot-backend` (confirmed 2026-07-01)
+
+If any *external* connection from `rails`/`sidekiq` (e.g. the IMAP email
+channel connecting out to a real mail server) hangs or resets specifically
+on responses larger than a single small packet — TCP connects fine, a small
+request goes out, then nothing comes back and the connection resets — check
+for an MTU mismatch before anything else:
+
+```bash
+docker exec <rails-or-sidekiq-container> sh -c "ip link show | grep mtu"
+ip link show | grep mtu   # run on the VPS host itself for comparison
+```
+
+On this host, the real physical interface (`enp7s0`) runs MTU **1450**
+(Hetzner's network fabric, not the standard 1500) — Dokploy's own
+`dokploy-network` overlay already correctly uses 1450, but a plain
+`driver: bridge` network we declare ourselves (like `chatwoot-backend`)
+defaults to MTU 1500 unless told otherwise, since Docker doesn't
+auto-detect the host's real path MTU for bridge networks. That mismatch
+causes exactly this symptom: small packets (like a TLS ClientHello) go out
+fine over the oversized-MTU bridge, but larger response packets (like a
+ServerHello + full certificate chain) get silently dropped when they hit
+the host's real, smaller-MTU physical interface — a classic PMTU
+blackhole. Confirmed directly: the exact same `openssl s_client` command
+that completed a full, valid TLS 1.3 handshake when run on the bare host
+failed identically (`errno=104`, connection reset, zero bytes read back)
+when run from inside the container.
+
+Fix (already applied in `docker-compose.yml`): explicitly set
+`chatwoot-backend`'s MTU to match the host's real value via `driver_opts`:
+
+```yaml
+networks:
+  chatwoot-backend:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"
+```
+
+**Important:** Docker networks are effectively immutable once created —
+editing this in the compose file and doing a normal "Redeploy" in Dokploy
+will *not* retroactively change the MTU of an already-existing
+`chatwoot-backend` network; Compose just reuses it as-is by name. The
+network has to actually be removed and recreated:
+
+```bash
+# stop the compose app in Dokploy first, then:
+docker network rm zerotredici-helpdesk-website-iw88r7_chatwoot-backend
+# then deploy again — Docker recreates it fresh with the new MTU
+```
+
+If this host's real MTU ever changes (different VPS, different network
+setup), re-check `ip link show` on the host and update the `"1450"` value
+above to match — don't assume it's always 1450.
+
 ## Host Preparation
 
 Run once on the Dokploy VPS before the first deploy:

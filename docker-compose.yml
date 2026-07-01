@@ -107,5 +107,7 @@ services:
 networks:
   chatwoot-backend:
     driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"
   dokploy-network:
     external: true
