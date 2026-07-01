@@ -16,7 +16,7 @@
 | Backend | Next.js Server Actions + API Routes |
 | Database | PostgreSQL via Prisma 6.19.3 (adapter: `@prisma/adapter-pg`) |
 | Auth | NextAuth.js 5 (beta.30) |
-| Real-time | Pusher |
+| Real-time | Pusher Cloud oppure Soketi self-hosted (vedi [real-time.md](./real-time.md)) |
 | Email | Resend + Nodemailer |
 | AI | Anthropic SDK (`claude-sonnet-4-5-20250929`) |
 | Validazione | Zod + t3-oss/env-nextjs |
@@ -91,13 +91,23 @@ Agent reply → sendMessage() action
 ```bash
 NEXT_PUBLIC_APP_URL
 AUTH_SECRET
-GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+AUTH_TRUST_HOST                              # true, dietro reverse proxy
 DATABASE_URL
 RESEND_API_KEY
-PUSHER_APP_ID / PUSHER_SECRET / NEXT_PUBLIC_PUSHER_KEY / NEXT_PUBLIC_PUSHER_CLUSTER
-ANTHROPIC_API_KEY
+EMAIL_FROM                                    # dominio verificato su Resend
+EMAIL_REPLY_TO_DOMAIN                         # opzionale, reply-by-email
+PUSHER_APP_ID / PUSHER_SECRET / NEXT_PUBLIC_PUSHER_KEY
+NEXT_PUBLIC_PUSHER_CLUSTER                    # Pusher Cloud, oppure:
+PUSHER_HOST / NEXT_PUBLIC_PUSHER_HOST         # Soketi self-hosted (priorità su cluster)
+GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET      # opzionali (login Google)
+ANTHROPIC_API_KEY                            # opzionale (funzionalità AI)
 SLACK_CLIENT_ID / SLACK_CLIENT_SECRET        # opzionali
 NEXT_PUBLIC_CLARITY_PROJECT_ID               # opzionale
 ```
 
-Dettaglio completo in [deployment.md](./deployment.md).
+Login email+password (Credentials provider) funziona con solo
+`AUTH_SECRET` + `DATABASE_URL` — Resend/Google non sono bloccanti.
+
+Dettaglio completo in [deployment.md](./deployment.md) e in
+[`DOKPLOY.md`](../../DOKPLOY.md) (percorso di deploy concreto su Dokploy
+per questo fork).

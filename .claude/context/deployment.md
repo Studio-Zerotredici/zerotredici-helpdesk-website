@@ -23,9 +23,49 @@ Vedi anche: [overview.md](./overview.md).
 
 **Stage 4 — runner** (`node:20.18-alpine`):
 - Copia solo `.next/standalone`, `.next/static`, `public/`, `prisma/`
+- Installa la Prisma CLI in una directory isolata `/opt/prisma-cli` (vedi
+  sotto — non copiata dallo stage builder)
+- Copia `entrypoint.sh` come `ENTRYPOINT`
 - User: `nextjs` (UID 1001, non-root)
 - Porta: `3000`
-- CMD: `node server.js`
+
+### Prisma CLI nel runner stage: perché un'installazione isolata
+
+Lo stage runner NON copia `node_modules/prisma` dal builder con una `COPY`
+semplice. Con pnpm, `node_modules/prisma` è un symlink dentro
+`node_modules/.pnpm`, e le dipendenze private della CLI
+(`@prisma/engines`, `@prisma/config`, ...) vivono come symlink *fratelli*
+nello stesso store virtuale — non nel `node_modules/@prisma` top-level
+(quello contiene solo `@prisma/client` e `@prisma/adapter-pg`, dipendenze
+dirette dell'app). Una `COPY` che prende solo `node_modules/prisma` +
+`node_modules/@prisma` lascia questi symlink "orfani" nello stage runner,
+causando `Cannot find module '@prisma/engines'` all'avvio.
+
+La soluzione (Dockerfile, stage runner): un `RUN` isolato crea
+`/opt/prisma-cli`, legge la versione esatta di `prisma` da
+`package.json` (`devDependencies.prisma`), e fa un `pnpm add` scoped in
+quella directory — così pnpm risolve correttamente l'intero albero di
+dipendenze della CLI in un solo layer, senza toccare il `node_modules` di
+`/app` (che contiene già l'output tracciato dello standalone build di
+Next.js, con versioni pinnate diverse da quelle di `package.json`).
+
+`entrypoint.sh` invoca quindi
+`node /opt/prisma-cli/node_modules/prisma/build/index.js migrate deploy --schema=/app/prisma/schema.prisma`
+con path assoluti.
+
+### entrypoint.sh — migrazioni al boot
+
+```sh
+#!/bin/sh
+set -e
+node /opt/prisma-cli/node_modules/prisma/build/index.js migrate deploy --schema=/app/prisma/schema.prisma
+exec node server.js
+```
+
+Eseguito su **ogni** avvio del container (`ENTRYPOINT` del Dockerfile).
+`migrate deploy` è idempotente — applica solo le migrazioni non ancora
+eseguite, quindi è sicuro rieseguirlo ad ogni boot. Il primo deploy crea lo
+schema da zero, senza bisogno di un `pnpm prisma db push` manuale.
 
 ### docker-compose.yml
 
@@ -47,6 +87,11 @@ networks:
 ```
 
 **Nota:** `AUTH_TRUST_HOST=true` è richiesto in produzione quando si usa un reverse proxy (Nginx, Traefik, Caddy).
+
+Su Dokploy si usa il build type **Dockerfile** direttamente (non
+docker-compose per l'app — Postgres e Soketi sono invece risorse/servizi
+Dokploy separati). Vedi [`DOKPLOY.md`](../../DOKPLOY.md) nella root del
+repo per il percorso di deploy completo specifico di Studio Zerotredici.
 
 ### Comandi Docker
 
@@ -80,16 +125,34 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
 
 # Email
 RESEND_API_KEY=re_xxxxx
+EMAIL_FROM="GudDesk <support@yourdomain.com>"      # dominio verificato su Resend
+EMAIL_REPLY_TO_DOMAIN=mail.yourdomain.com          # opzionale, per reply-by-email
 
-# Real-time
+# Real-time — Opzione A: Pusher Cloud
 PUSHER_APP_ID=
 PUSHER_SECRET=
 NEXT_PUBLIC_PUSHER_KEY=
 NEXT_PUBLIC_PUSHER_CLUSTER=eu
 
+# Real-time — Opzione B: Soketi self-hosted (alternativa a Pusher Cloud,
+# vedi real-time.md). PUSHER_HOST presente ha priorità su
+# NEXT_PUBLIC_PUSHER_CLUSTER.
+PUSHER_HOST=ws.yourdomain.com
+PUSHER_PORT=443
+PUSHER_USE_TLS=true
+NEXT_PUBLIC_PUSHER_HOST=ws.yourdomain.com
+NEXT_PUBLIC_PUSHER_PORT=443
+NEXT_PUBLIC_PUSHER_FORCE_TLS=true
+
 # AI
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 ```
+
+`EMAIL_FROM` / `EMAIL_REPLY_TO_DOMAIN` sostituiscono i vecchi sender
+hardcoded (`onboarding@resend.dev` sandbox, `guddesk.com` non di nostra
+proprietà) in `auth.config.ts`, `actions/forgot-password.ts`,
+`actions/invite-workspace-member.ts` e `lib/email-notifications.ts` — vedi
+[integrations.md](./integrations.md).
 
 ### Opzionali
 

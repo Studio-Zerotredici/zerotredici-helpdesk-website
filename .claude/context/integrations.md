@@ -38,6 +38,20 @@ manageSlackIntegration(workspaceId, action: "connect" | "disconnect" | "update",
 - **API Key:** `RESEND_API_KEY`
 - **File:** `lib/email.ts` (init Resend), `lib/email-notifications.ts`
 
+### Sender: `EMAIL_FROM` / `EMAIL_REPLY_TO_DOMAIN`
+
+`auth.config.ts` (magic link), `actions/forgot-password.ts`,
+`actions/invite-workspace-member.ts` e `lib/email-notifications.ts` leggono
+il sender da `env.EMAIL_FROM` (es. `GudDesk <support@yourdomain.com>`),
+con un fallback dev-only se non impostata. **Il dominio in `EMAIL_FROM` deve
+essere verificato nell'account Resend** prima del go-live — vedi
+[`DOKPLOY.md`](../../DOKPLOY.md) step 5.
+
+I vecchi default hardcoded sono stati rimossi perché non production-safe:
+`onboarding@resend.dev` (sandbox Resend, consegna solo all'email
+dell'account Resend proprietario) e sender su `guddesk.com` (dominio non di
+nostra proprietà).
+
 ### Email inviate dall'app
 
 | Trigger | Template | Destinatario |
@@ -51,11 +65,14 @@ manageSlackIntegration(workspaceId, action: "connect" | "disconnect" | "update",
 ```typescript
 // lib/email-notifications.ts
 sendAgentNotificationEmail(conversationId: string, visitorMessage: string)
-// From: GudDesk <noreply@guddesk.com>
-// Reply-To: reply+{conversationId}@mail.guddesk.com
+// From: env.EMAIL_FROM
+// Reply-To: reply+{conversationId}@{env.EMAIL_REPLY_TO_DOMAIN}
 ```
 
-Il Reply-To speciale consente future implementazioni di risposta via email (inbound email handling).
+Il Reply-To speciale consente la risposta via email (inbound email
+handling, vedi sotto). `EMAIL_REPLY_TO_DOMAIN` è opzionale — necessario solo
+se si vuole abilitare questa feature, e richiede l'inbound routing di
+Resend configurato sul dominio.
 
 ### Inbound Email
 ```

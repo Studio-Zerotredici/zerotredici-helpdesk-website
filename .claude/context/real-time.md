@@ -1,30 +1,60 @@
-# Real-time — Pusher
+# Real-time — Pusher / Soketi self-hosted
 
 Vedi anche: [inbox.md](./inbox.md), [widget.md](./widget.md).
 
 ## Stack
 
-- **Provider:** Pusher (hosted WebSocket service)
+Due backend supportati, scelti a runtime in base alle env var (nessuna
+modifica di codice richiesta per passare dall'uno all'altro):
+
+- **Opzione A — Pusher Cloud:** servizio SaaS hosted. I dati di chat
+  escono dalla nostra infrastruttura.
+- **Opzione B — Soketi self-hosted:** server Pusher-protocol-compatible,
+  auto-ospitato (scelto per Studio Zerotredici su Dokploy per data
+  residency EU — vedi [`DOKPLOY.md`](../../DOKPLOY.md) step 2). Quando
+  `PUSHER_HOST` (server) / `NEXT_PUBLIC_PUSHER_HOST` (client) sono
+  impostati, hanno priorità sul cluster Pusher Cloud.
+
 - **Server SDK:** `pusher` npm package
 - **Client SDK:** `pusher-js`
 - **Server file:** `lib/pusher-server.ts`
 - **Client file:** `lib/pusher-client.ts`
+- **Widget:** `packages/widget/src/api/pusher.ts` (stessa logica, bundle separato)
 
 ## Variabili d'ambiente
 
 ```bash
-PUSHER_APP_ID=               # server-side
-PUSHER_SECRET=               # server-side
-NEXT_PUBLIC_PUSHER_KEY=      # client-side
-NEXT_PUBLIC_PUSHER_CLUSTER=  # client-side (es. "eu")
+# Comuni
+PUSHER_APP_ID=                    # server-side
+PUSHER_SECRET=                    # server-side
+NEXT_PUBLIC_PUSHER_KEY=           # client-side
+
+# Opzione A — Pusher Cloud
+NEXT_PUBLIC_PUSHER_CLUSTER=       # es. "eu"
+
+# Opzione B — Soketi self-hosted (PUSHER_HOST presente > cluster)
+PUSHER_HOST=                      # es. ws.yourdomain.com
+PUSHER_PORT=                      # default 6001, es. 443 dietro TLS
+PUSHER_USE_TLS=                   # "true"/"false"
+NEXT_PUBLIC_PUSHER_HOST=
+NEXT_PUBLIC_PUSHER_PORT=
+NEXT_PUBLIC_PUSHER_FORCE_TLS=
 ```
+
+Con Soketi, `PUSHER_APP_ID` / `NEXT_PUBLIC_PUSHER_KEY` / `PUSHER_SECRET`
+devono combaciare esattamente con `SOKETI_DEFAULT_APP_ID` /
+`_APP_KEY` / `_APP_SECRET` configurati sul servizio Soketi.
 
 ## Istanza server
 
 ```typescript
 // lib/pusher-server.ts
 function getPusherServer(): Pusher | null
-// Ritorna null se PUSHER_APP_ID/SECRET non configurati
+// Ritorna null se PUSHER_APP_ID/SECRET non configurati, oppure se né
+// PUSHER_HOST né NEXT_PUBLIC_PUSHER_CLUSTER sono impostati
+
+// Se PUSHER_HOST è settato: new Pusher({ appId, key, secret, host, port, useTLS })
+// Altrimenti (Pusher Cloud): new Pusher({ appId, key, secret, cluster, useTLS: true })
 
 // Utilizzo
 const pusher = getPusherServer()
@@ -40,11 +70,20 @@ if (pusher) {
 function getPusherClient(): PusherJS | null
 // Singleton, inizializzato con NEXT_PUBLIC_PUSHER_KEY
 
+// Se NEXT_PUBLIC_PUSHER_HOST è settato: new PusherClient(key, { wsHost, wsPort, wssPort, forceTLS, ... })
+// Altrimenti (Pusher Cloud): new PusherClient(key, { cluster, ... })
+
 // Utilizzo nei componenti React
 const pusher = getPusherClient()
 const channel = pusher.subscribe("private-conversation-xxx")
 channel.bind("message:created", handler)
 ```
+
+**Nota tipizzazione:** `pusher-js` tipizza `cluster` come campo obbligatorio
+in `Options` anche quando si usa `wsHost` (dove viene ignorato a runtime).
+Sia `lib/pusher-client.ts` che `packages/widget/src/api/pusher.ts` passano
+un `cluster: ""` placeholder nel branch `wsHost` per soddisfare TypeScript
+senza cambiare il comportamento a runtime.
 
 ## Canali
 
