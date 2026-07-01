@@ -59,8 +59,13 @@ export async function GET(req: NextRequest) {
     offlineFormTimeout: workspace.widgetSettings?.offlineFormTimeout ?? null,
     pageVisibilityMode: workspace.widgetSettings?.pageVisibilityMode ?? "exclude",
     pageVisibilityPatterns: workspace.widgetSettings?.pageVisibilityPatterns ?? [],
-    // Pusher credentials for real-time messaging (public keys only)
+    // Pusher credentials for real-time messaging (public keys only).
+    // Either pusherCluster (Pusher Cloud) or pusherHost (self-hosted
+    // Soketi) will be set, never both.
     pusherKey: env.NEXT_PUBLIC_PUSHER_KEY || null,
     pusherCluster: env.NEXT_PUBLIC_PUSHER_CLUSTER || null,
+    pusherHost: env.NEXT_PUBLIC_PUSHER_HOST || null,
+    pusherPort: env.NEXT_PUBLIC_PUSHER_PORT || null,
+    pusherForceTLS: env.NEXT_PUBLIC_PUSHER_FORCE_TLS !== "false",
   });
 }

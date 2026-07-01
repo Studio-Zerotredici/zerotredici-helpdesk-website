@@ -16,7 +16,11 @@ export default {
     }),
     Resend({
       apiKey: env.RESEND_API_KEY,
-      from: "GudDesk App <onboarding@resend.dev>",
+      // onboarding@resend.dev is Resend's sandbox sender — it can only
+      // deliver to the Resend account owner's own verified address, so
+      // magic-link login will silently fail for real users unless
+      // EMAIL_FROM is set to an address on a domain verified in Resend.
+      from: env.EMAIL_FROM ?? "GudDesk App <onboarding@resend.dev>",
     }),
     Credentials({
       async authorize(credentials) {

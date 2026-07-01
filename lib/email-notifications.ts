@@ -1,9 +1,22 @@
 import { Resend } from "resend";
 
 import { prisma } from "@/lib/db";
+import { env } from "@/env.mjs";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(env.RESEND_API_KEY);
 const brandColor = "#3ECF8E";
+
+// Extract the domain from EMAIL_FROM (e.g. "GudDesk <support@yourdomain.com>"
+// -> "yourdomain.com") so per-workspace notification senders share the same
+// verified Resend domain. Falls back to the guddesk.com placeholder if
+// EMAIL_FROM isn't set (dev only — sending will fail in production since
+// nobody owns that domain in your Resend account).
+function getNotificationDomain(): string {
+  const match = env.EMAIL_FROM?.match(/@([^>]+)>?$/);
+  return match?.[1] ?? "guddesk.com";
+}
+
+const replyToDomain = env.EMAIL_REPLY_TO_DOMAIN ?? "mail.guddesk.com";
 
 export async function sendAgentNotificationEmail(
   conversationId: string,
@@ -34,10 +47,10 @@ export async function sendAgentNotificationEmail(
 
   try {
     await resend.emails.send({
-      from: `${conversation.workspace.name} <notifications@guddesk.com>`,
+      from: `${conversation.workspace.name} <notifications@${getNotificationDomain()}>`,
       to: conversation.assignee.user.email,
       subject: `New message from ${visitorLabel}`,
-      replyTo: `reply+${conversationId}@mail.guddesk.com`,
+      replyTo: `reply+${conversationId}@${replyToDomain}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 0;">
           <div style="background-color: ${brandColor}; border-radius: 8px 8px 0 0; padding: 20px 24px; text-align: center;">

@@ -49,8 +49,31 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 
+# Prisma CLI (not traced by `next build`'s standalone output, which only
+# bundles runtime imports) — needed at container start to run
+# `prisma migrate deploy`. Installed fresh into an isolated directory rather
+# than copied from the builder stage or added into /app: pnpm's non-hoisted
+# node_modules keeps the CLI's own private dependencies (@prisma/engines,
+# @prisma/config, ...) as symlinks into node_modules/.pnpm, which a plain
+# `COPY` of node_modules/prisma leaves dangling once separated from that
+# store — and running `pnpm add` directly in /app (which already has the
+# full app package.json but no lockfile) would reinstall the entire
+# dependency tree at different resolved versions than the build used.
+# A scoped install in its own directory resolves only the CLI's own tree.
+# Note: prisma.config.ts is deliberately not referenced here so the CLI
+# falls back to the conventional prisma/schema.prisma path instead of
+# trying to load dotenv/other build-time-only deps.
+RUN npm install -g pnpm@10.32.1 && \
+    PRISMA_VERSION=$(node -p "require('/app/package.json').devDependencies.prisma.replace(/^[^0-9]*/, '')") && \
+    mkdir -p /opt/prisma-cli && cd /opt/prisma-cli && \
+    pnpm init && pnpm add --ignore-scripts "prisma@${PRISMA_VERSION}" && \
+    chown -R nextjs:nodejs /opt/prisma-cli
+
+COPY --chown=nextjs:nodejs entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["./entrypoint.sh"]

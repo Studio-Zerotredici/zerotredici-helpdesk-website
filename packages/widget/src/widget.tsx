@@ -14,12 +14,23 @@ interface WidgetAppProps {
   baseUrl: string;
   pusherKey?: string;
   pusherCluster?: string;
+  pusherHost?: string;
+  pusherPort?: string;
+  pusherForceTLS?: boolean;
 }
 
 // Polling interval when Pusher is not available (4 seconds)
 const POLL_INTERVAL = 4000;
 
-export function WidgetApp({ appId, baseUrl, pusherKey, pusherCluster }: WidgetAppProps) {
+export function WidgetApp({
+  appId,
+  baseUrl,
+  pusherKey,
+  pusherCluster,
+  pusherHost,
+  pusherPort,
+  pusherForceTLS,
+}: WidgetAppProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pusherInitRef = useRef(false);
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,11 +55,17 @@ export function WidgetApp({ appId, baseUrl, pusherKey, pusherCluster }: WidgetAp
   }
 
   // Try to init Pusher with the given keys
-  async function tryInitPusher(key: string, cluster: string) {
+  async function tryInitPusher(
+    key: string,
+    cluster?: string | null,
+    host?: string | null,
+    port?: string | null,
+    forceTLS?: boolean,
+  ) {
     if (pusherInitRef.current) return;
     pusherInitRef.current = true;
     try {
-      await initPusher(key, cluster, `${baseUrl}/api/pusher/auth`);
+      await initPusher(key, cluster, `${baseUrl}/api/pusher/auth`, host, port, forceTLS);
       // If we already have a conversation, subscribe now
       if (conversationId.value) {
         subscribeToConversation();
@@ -90,9 +107,12 @@ export function WidgetApp({ appId, baseUrl, pusherKey, pusherCluster }: WidgetAp
       // Try Pusher from props first, then from config response
       const pKey = pusherKey || config.value.pusherKey;
       const pCluster = pusherCluster || config.value.pusherCluster;
+      const pHost = pusherHost || config.value.pusherHost;
+      const pPort = pusherPort || config.value.pusherPort;
+      const pForceTLS = pusherForceTLS ?? config.value.pusherForceTLS;
 
-      if (pKey && pCluster) {
-        tryInitPusher(pKey, pCluster);
+      if (pKey && (pCluster || pHost)) {
+        tryInitPusher(pKey, pCluster, pHost, pPort, pForceTLS);
       } else {
         // No Pusher configured — use polling
         startPolling();

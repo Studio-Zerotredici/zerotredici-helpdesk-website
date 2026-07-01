@@ -191,9 +191,14 @@ Bot messages appear natively in both the chat widget and the agent inbox. Build 
 3. Set environment variables in the Vercel dashboard
 4. Deploy — Vercel handles the build automatically
 
-### Docker (Coming Soon)
+### Docker / Dokploy (self-hosted)
 
-Docker Compose support for self-hosted deployments is in development.
+This fork ships a multi-stage `Dockerfile` (standalone Next.js output, widget
++ Contentlayer build baked in, migrations run automatically on container
+start via `entrypoint.sh`) plus `docker-compose.yml` and
+`soketi-docker-compose.yml` for a self-hosted real-time backend. See
+[`DOKPLOY.md`](./DOKPLOY.md) for the full Studio Zerotredici deployment
+runbook.
 
 ### Manual
 

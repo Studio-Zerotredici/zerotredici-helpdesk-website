@@ -19,8 +19,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse the "to" address to find conversation context
-    // Format: reply+{conversationId}@mail.guddesk.com
+    // Parse the "to" address to find conversation context.
+    // Format: reply+{conversationId}@<EMAIL_REPLY_TO_DOMAIN> — the domain
+    // itself isn't validated here (Resend's inbound route already scopes
+    // this webhook to your domain), only the reply+{id}@ local-part shape.
     const toAddress = Array.isArray(to) ? to[0] : to;
     const match = toAddress.match(/reply\+([a-z0-9]+)@/i);
 

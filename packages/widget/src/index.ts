@@ -8,6 +8,9 @@ interface GudDeskSettings {
   baseUrl?: string;
   pusherKey?: string;
   pusherCluster?: string;
+  pusherHost?: string;
+  pusherPort?: string;
+  pusherForceTLS?: boolean;
 }
 
 declare global {
@@ -71,6 +74,9 @@ function init(settings: GudDeskSettings) {
       baseUrl,
       pusherKey: settings.pusherKey,
       pusherCluster: settings.pusherCluster,
+      pusherHost: settings.pusherHost,
+      pusherPort: settings.pusherPort,
+      pusherForceTLS: settings.pusherForceTLS,
     }),
     shadowRoot,
   );

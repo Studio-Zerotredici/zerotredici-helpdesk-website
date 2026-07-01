@@ -50,7 +50,7 @@ export async function forgotPassword(values: { email: string }) {
 
   try {
     await resend.emails.send({
-      from: "GudDesk <onboarding@resend.dev>",
+      from: env.EMAIL_FROM ?? "GudDesk <onboarding@resend.dev>",
       to:
         process.env.NODE_ENV === "development"
           ? "delivered@resend.dev"

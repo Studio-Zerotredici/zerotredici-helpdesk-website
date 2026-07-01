@@ -73,7 +73,7 @@ export async function inviteWorkspaceMember(
 
     try {
       await resend.emails.send({
-        from: "GudDesk <onboarding@resend.dev>",
+        from: env.EMAIL_FROM ?? "GudDesk <onboarding@resend.dev>",
         to: email,
         subject: `You've been invited to join ${workspace?.name ?? "a workspace"} on GudDesk`,
         react: WorkspaceInvitationEmail({
