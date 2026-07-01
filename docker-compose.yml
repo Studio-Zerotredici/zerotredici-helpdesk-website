@@ -33,7 +33,6 @@ services:
       ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: "${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:-}"
       ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: "${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:-}"
     networks:
-      - chatwoot-backend
       - dokploy-network
     security_opt:
       - no-new-privileges:true
@@ -73,7 +72,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Dokploy Environment}"
     networks:
-      - chatwoot-backend
       - dokploy-network
     security_opt:
       - no-new-privileges:true
@@ -94,7 +92,6 @@ services:
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in Dokploy Environment}"
     networks:
-      - chatwoot-backend
       - dokploy-network
     security_opt:
       - no-new-privileges:true
@@ -105,9 +102,5 @@ services:
       retries: 10
 
 networks:
-  chatwoot-backend:
-    driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: "1450"
   dokploy-network:
     external: true
