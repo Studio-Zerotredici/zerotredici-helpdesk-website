@@ -1,0 +1,106 @@
+services:
+  base: &base
+    image: chatwoot/chatwoot:v4.15.1-ce
+    volumes:
+      - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
+    environment:
+      FRONTEND_URL: "${FRONTEND_URL:-https://helpdesk.zerotredici.app}"
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Set SECRET_KEY_BASE in Dokploy Environment}"
+      RAILS_ENV: production
+      NODE_ENV: production
+      INSTALLATION_ENV: docker
+      RAILS_LOG_TO_STDOUT: "true"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      DEFAULT_LOCALE: "${DEFAULT_LOCALE:-it}"
+      ENABLE_ACCOUNT_SIGNUP: "false"
+      ACTIVE_STORAGE_SERVICE: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DATABASE: chatwoot
+      POSTGRES_USERNAME: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Dokploy Environment}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in Dokploy Environment}"
+      MAILER_SENDER_EMAIL: "${MAILER_SENDER_EMAIL:?Set MAILER_SENDER_EMAIL in Dokploy Environment}"
+      SMTP_ADDRESS: "${SMTP_ADDRESS:?Set SMTP_ADDRESS in Dokploy Environment}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_AUTHENTICATION: plain
+      SMTP_ENABLE_STARTTLS_AUTO: "true"
+      SMTP_USERNAME: "${SMTP_USERNAME:?Set SMTP_USERNAME in Dokploy Environment}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:?Set SMTP_PASSWORD in Dokploy Environment}"
+      # --- Phase 2: MFA (leave blank for first deploy, see docs/DOKPLOY_ENVIRONMENT.md) ---
+      ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: "${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:-}"
+      ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: "${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:-}"
+      ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: "${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:-}"
+    networks:
+      - chatwoot-backend
+    security_opt:
+      - no-new-privileges:true
+
+  rails:
+    <<: *base
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "3000"
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "sh", "-c", "rails db:chatwoot_prepare && rails s -p 3000 -b 0.0.0.0"]
+    restart: unless-stopped
+
+  sidekiq:
+    <<: *base
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    expose:
+      - "5432"
+    volumes:
+      - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: chatwoot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Dokploy Environment}"
+    networks:
+      - chatwoot-backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chatwoot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    expose:
+      - "6379"
+    volumes:
+      - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/redis:/data
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in Dokploy Environment}"
+    networks:
+      - chatwoot-backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  chatwoot-backend:
+    driver: bridge
