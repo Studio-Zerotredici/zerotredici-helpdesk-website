@@ -153,6 +153,29 @@ If this host's real MTU ever changes (different VPS, different network
 setup), re-check `ip link show` on the host and update the `"1450"` value
 above to match — don't assume it's always 1450.
 
+**Update, 2026-07-01 — actual confirmed root cause of the IMAP connection
+failure was different from the MTU issue above.** After extensive
+diagnosis (DNS, TLS version, cipher suite, SNI, and the MTU mismatch above
+were all checked and ruled out or fixed along the way), the real fix was
+on the mail server's own infrastructure, not this repo: `imap.zerotredici.com`
+and `smtp.zerotredici.com` on their standard ports (993, 587) were being
+served through an HAProxy reverse-proxy in front of the actual mail
+servers, and Chatwoot's IMAP client didn't get along with however that
+proxy handled the TLS passthrough. Fix (applied on the
+`hosting.zerotredici.com` pfSense firewall, not in this repo): dedicated
+NAT port-forward rules that bypass HAProxy entirely, mapping new
+externally-facing ports directly to the mail server's real ports —
+**IMAP: external port `2293` → `993`**, **SMTP: external port `2265` →
+`465`** (SSL/TLS, not STARTTLS) on the internal mail host. The Chatwoot
+Email Channel settings for the `supporto@zerotredici.com` inbox use these
+non-standard port numbers, not the standard 993/587 — if reconfiguring
+this inbox or adding another one against the same mail infrastructure,
+use `2293`/`2265`, not the standard ports, and expect this same failure
+mode if a new inbox tries the standard ports again. The `dokploy-network`-only
+networking simplification above was applied around the same time and may
+also have been a contributing factor, but the HAProxy bypass is the
+confirmed decisive fix.
+
 ## Host Preparation
 
 Run once on the Dokploy VPS before the first deploy:

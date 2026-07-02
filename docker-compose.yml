@@ -46,6 +46,13 @@ services:
         condition: service_healthy
     expose:
       - "3000"
+    # Declared explicitly (not just inherited via <<: *base) because Dokploy's
+    # domain-injection rewrite for the one service with a domain assigned
+    # doesn't reliably preserve keys only present through a YAML anchor —
+    # same root cause as the networks: bug fixed earlier. See
+    # docs/DEPLOYMENT_GUIDE.md "Networking Model" for the analogous case.
+    volumes:
+      - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
     entrypoint: docker/entrypoints/rails.sh
     command: ["bundle", "exec", "sh", "-c", "rails db:chatwoot_prepare && rails s -p 3000 -b 0.0.0.0"]
     restart: unless-stopped
@@ -57,6 +64,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
     command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
     restart: unless-stopped
 
