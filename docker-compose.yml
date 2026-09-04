@@ -1,6 +1,6 @@
 services:
   base: &base
-    image: chatwoot/chatwoot:v4.15.1-ce
+    image: chatwoot/chatwoot:v4.17.1-ce
     volumes:
       - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
     environment:
