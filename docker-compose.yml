@@ -5,6 +5,8 @@ services:
       - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
     environment:
       FRONTEND_URL: "${FRONTEND_URL:-https://helpdesk.zerotredici.app}"
+      # Studio thread engine (7be706a5): subject matching only logs; Message-ID routing, redirect and real sender are active.
+      STUDIO_THREAD_SUBJECT_MODE: "observe"
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Set SECRET_KEY_BASE in Dokploy Environment}"
       RAILS_ENV: production
       NODE_ENV: production
@@ -54,6 +56,7 @@ services:
     volumes:
       - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
       - ./config/initializers/webhook_job_argument_logging.rb:/app/config/initializers/webhook_job_argument_logging.rb:ro
+      - ./config/initializers/studio_thread_matching.rb:/app/config/initializers/studio_thread_matching.rb:ro
     entrypoint: docker/entrypoints/rails.sh
     command: ["bundle", "exec", "sh", "-c", "rails db:chatwoot_prepare && rails s -p 3000 -b 0.0.0.0"]
     restart: unless-stopped
@@ -68,6 +71,7 @@ services:
     volumes:
       - /var/www/studio_zerotredici/helpdesk.zerotredici.app/data/storage:/app/storage
       - ./config/initializers/webhook_job_argument_logging.rb:/app/config/initializers/webhook_job_argument_logging.rb:ro
+      - ./config/initializers/studio_thread_matching.rb:/app/config/initializers/studio_thread_matching.rb:ro
     command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
     restart: unless-stopped
 
